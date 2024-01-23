@@ -12,8 +12,10 @@ class SimpleExcel:
         self.root = root
         self.root.title("Simple Excel")
 
-        # Initialize self.data
+        # Initialize self.data, self.formulas, and self.calculated_values
         self.data = [['' for _ in range(self.COLS)] for _ in range(self.ROWS)]
+        self.formulas = [['' for _ in range(self.COLS)] for _ in range(self.ROWS)]
+        self.calculated_values = [['' for _ in range(self.COLS)] for _ in range(self.ROWS)]
 
         # Variable to store the selected cell coordinates
         self.selected_cell = None
@@ -85,8 +87,47 @@ class SimpleExcel:
                 self.entries[i][j].bind('<Return>', lambda event, row=i, col=j: self.on_enter_key(row, col))
 
     def on_enter_key(self, row, col):
-        # Evaluate and update dependent cells if there's a formula
-        self.evaluate_and_update_dependents(row, col)
+        # Check if the cell contains a formula
+        if self.data[row][col] and self.data[row][col][0] == '=':
+            formula = self.data[row][col][1:]
+            try:
+                # Replace cell references with their values
+                processed_formula = self.replace_cell_references(formula)
+
+                # Evaluate the formula using sympy
+                result = sympify(processed_formula)
+
+                # Update the cell value, formula, and calculated value with the result
+                self.entries[row][col].delete(0, tk.END)
+                self.entries[row][col].insert(0, str(result))
+                self.data[row][col] = str(result)
+                self.formulas[row][col] = formula
+                self.calculated_values[row][col] = str(result)
+
+                # Update other cells that depend on this cell
+                for i in range(self.ROWS):
+                    for j in range(self.COLS):
+                        if i != row and j != col and self.data[i][j] and self.data[i][j][0] == '=':
+                            self.evaluate_and_update_dependents(i, j)
+
+            except Exception as e:
+                messagebox.showerror("Error", f"Error evaluating formula: {e}")
+
+        # Set the selected cell coordinates
+        self.selected_cell = (row, col)
+
+        # Display the content of the selected cell in the entry widget
+        self.selected_entry.config(state=tk.NORMAL)  # Enable the entry field
+
+        if self.selected_cell == (row, col):
+            if self.data[row][col] and self.data[row][col][0] == '=':
+                # If the cell contains a formula, show the formula in the entry widget
+                self.selected_entry.delete(0, tk.END)
+                self.selected_entry.insert(0, self.data[row][col])
+            else:
+                # If the cell does not contain a formula, show the value in the entry widget
+                self.selected_entry.delete(0, tk.END)
+                self.selected_entry.insert(0, self.f[row][col])
 
     def on_cell_change(self, row, col):
         # Update the data when a cell value changes
@@ -103,8 +144,19 @@ class SimpleExcel:
 
         # Display the content of the selected cell in the entry widget
         self.selected_entry.config(state=tk.NORMAL)  # Enable the entry field
-        self.selected_entry.delete(0, tk.END)
-        self.selected_entry.insert(0, self.data[row][col])
+
+        if self.selected_cell == (row, col):
+            # Show the formula if there is a formula, otherwise show the value
+            if self.formulas[row][col]:
+                self.selected_entry.delete(0, tk.END)
+                self.selected_entry.insert(0, '=' + self.formulas[row][col])
+            else:
+                self.selected_entry.delete(0, tk.END)
+                self.selected_entry.insert(0, self.data[row][col])
+
+        # Update the flag to indicate that the cell is being edited
+        self.editing_cell = True
+
 
     def on_selected_entry_change(self, event):
         # Update the data when the separate entry field value changes
@@ -125,12 +177,14 @@ class SimpleExcel:
 
                 # Evaluate the formula using sympy
                 result = sympify(processed_formula)
-                
-                # Update the cell value with the result
+
+                # Update the cell value, formula, and calculated value with the result
                 self.entries[row][col].delete(0, tk.END)
                 self.entries[row][col].insert(0, str(result))
                 self.data[row][col] = str(result)
-                
+                self.formulas[row][col] = formula
+                self.calculated_values[row][col] = str(result)
+
                 # Update other cells that depend on this cell
                 for i in range(self.ROWS):
                     for j in range(self.COLS):
@@ -154,20 +208,29 @@ class SimpleExcel:
         return formula
 
     def save_to_json(self):
-        # Save data to a JSON file
+        # Save data, formulas, and calculated values to a JSON file
+        data_to_save = {
+            'data': self.data,
+            'formulas': self.formulas,
+            'calculated_values': self.calculated_values
+        }
+
         with open('excel_data.json', 'w') as json_file:
-            json.dump(self.data, json_file)
+            json.dump(data_to_save, json_file)
 
     def load_from_json(self):
         try:
             with open('excel_data.json', 'r') as json_file:
                 loaded_data = json.load(json_file)
 
+            self.data = loaded_data['data']
+            self.formulas = loaded_data['formulas']
+            self.calculated_values = loaded_data['calculated_values']
+
             for i in range(self.ROWS):
                 for j in range(self.COLS):
                     self.entries[i][j].delete(0, tk.END)
-                    self.entries[i][j].insert(0, loaded_data[i][j])
-                    self.data[i][j] = loaded_data[i][j]
+                    self.entries[i][j].insert(0, self.data[i][j])
 
         except (FileNotFoundError, json.decoder.JSONDecodeError) as e:
             messagebox.showerror("Error", f"Error loading data: {e}")
