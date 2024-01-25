@@ -7,14 +7,26 @@ from tkinter import messagebox
 
 def evaluate_and_update_dependents(self, row, col):
     # Check if the cell contains a formula
-    if self.data[row][col] and self.data[row][col][0] == '=':
-        formula = self.data[row][col][1:]
+    print("evaluate_and_update_dependents")
+
+    if self.formulas[row][col]:
+        formula = self.formulas[row][col]
         try:
+            if not formula:
+                # Skip evaluation if the formula is empty
+                return
+
+            print(f"Evaluating formula: {formula} at cell ({row}, {col})")
+
             # Replace cell references with their values
             processed_formula = replace_cell_references(formula, self)
 
+            print(f"Processed formula: {processed_formula}")
+
             # Evaluate the formula using sympy
             result = sympify(processed_formula)
+
+            print(f"Result: {result}")
 
             # Update the cell value, formula, and calculated value with the result
             self.entries[row][col].delete(0, tk.END)
@@ -26,12 +38,12 @@ def evaluate_and_update_dependents(self, row, col):
             # Update other cells that depend on this cell
             for i in range(self.ROWS):
                 for j in range(self.COLS):
-                    if i != row and j != col and self.data[i][j] and self.data[i][j][0] == '=':
+                    if i != row and j != col and self.formulas[i][j]:
+                        print(f"Recursively calling evaluate_and_update_dependents for cell ({i}, {j})")
                         self.evaluate_and_update_dependents(i, j)
 
         except Exception as e:
             messagebox.showerror("Error", f"Error evaluating formula: {e}")
-
 
 def replace_cell_references(formula, excel_instance):
     # Replace cell references (e.g., =A1) with their corresponding values
@@ -41,8 +53,10 @@ def replace_cell_references(formula, excel_instance):
         row = int(match[1]) - 1
         col = ord(match[0]) - ord('A')
         cell_value = excel_instance.data[row][col]
+        print(f"Replacing {match} with {cell_value} in formula: {formula}")
         formula = formula.replace(match, cell_value)
     return formula
+
 
 def save_to_json(self):
     # Save data, formulas, and calculated values to a JSON file
