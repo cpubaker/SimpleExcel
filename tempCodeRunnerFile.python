@@ -1,0 +1,17 @@
+from typing import Tuple
+
+Coordinate = Tuple[int, int]
+
+def square_board(side: int, token: int, steps: int) -> Coordinate:
+    # Calculate the new position after moving steps
+    new_position = (token + steps) % (side * 4)
+
+    # Derive the updated row and col values from the new position
+    row = new_position // side
+    col = new_position % side
+
+    return row, col
+
+# Test cases
+print(square_board(4, 1, 4))  # Should print (1, 0)
+print(square_board(6, 2, -3))  # Should print (4, 5)

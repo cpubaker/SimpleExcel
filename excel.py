@@ -1,8 +1,14 @@
+# excel.py
 import tkinter as tk
 from tkinter import messagebox
-import json
-import re
-from sympy import symbols, sympify
+from utils import (
+    evaluate_and_update_dependents,
+    replace_cell_references,
+    save_to_json,
+    load_from_json,
+    cloud_save,
+    cloud_load
+)
 
 class SimpleExcel:
     ROWS = 5
@@ -19,6 +25,8 @@ class SimpleExcel:
 
         # Variable to store the selected cell coordinates
         self.selected_cell = None
+        # Variable to store the last edited cell coordinates
+        self.last_edited_cell = None
 
         # Create Save, Load, Cloud Save, Cloud Load, and Entry widgets in a top frame
         self.create_button_frame()
@@ -27,6 +35,12 @@ class SimpleExcel:
 
         # Create a table (editable grid) with labels above it
         self.create_table()
+
+        # Bind the new method to the cell selection event
+        self.table_frame.bind('<FocusIn>', self.on_cell_selection)
+
+        # Bind the new method to the focus-out event
+        self.root.bind('<FocusOut>', self.on_focus_out)
 
     def create_button_frame(self):
         button_frame = tk.Frame(self.root)
@@ -86,48 +100,38 @@ class SimpleExcel:
                 # Attach an event handler to capture the Enter key press
                 self.entries[i][j].bind('<Return>', lambda event, row=i, col=j: self.on_enter_key(row, col))
 
+                # Attach an event handler to capture the focus-out event
+                self.entries[i][j].bind('<FocusOut>', lambda event, row=i, col=j: self.on_focus_out(event))
+
     def on_enter_key(self, row, col):
-        # Check if the cell contains a formula
-        if self.data[row][col] and self.data[row][col][0] == '=':
-            formula = self.data[row][col][1:]
-            try:
-                # Replace cell references with their values
-                processed_formula = self.replace_cell_references(formula)
-
-                # Evaluate the formula using sympy
-                result = sympify(processed_formula)
-
-                # Update the cell value, formula, and calculated value with the result
-                self.entries[row][col].delete(0, tk.END)
-                self.entries[row][col].insert(0, str(result))
-                self.data[row][col] = str(result)
-                self.formulas[row][col] = formula
-                self.calculated_values[row][col] = str(result)
-
-                # Update other cells that depend on this cell
-                for i in range(self.ROWS):
-                    for j in range(self.COLS):
-                        if i != row and j != col and self.data[i][j] and self.data[i][j][0] == '=':
-                            self.evaluate_and_update_dependents(i, j)
-
-            except Exception as e:
-                messagebox.showerror("Error", f"Error evaluating formula: {e}")
-
+        # Evaluate and update dependent cells if there's a formula
+        evaluate_and_update_dependents(self, row, col)
+    
         # Set the selected cell coordinates
         self.selected_cell = (row, col)
-
+    
         # Display the content of the selected cell in the entry widget
         self.selected_entry.config(state=tk.NORMAL)  # Enable the entry field
-
+    
         if self.selected_cell == (row, col):
-            if self.data[row][col] and self.data[row][col][0] == '=':
-                # If the cell contains a formula, show the formula in the entry widget
+            # Show the formula if there is a formula, otherwise show the value
+            if self.formulas[row][col]:
+                formula = '=' + self.formulas[row][col]
+                self.selected_entry.delete(0, tk.END)
+                self.selected_entry.insert(0, formula)
+    
+                # Update the cell to show the formula result
+                self.entries[row][col].delete(0, tk.END)
+                self.entries[row][col].insert(0, str(self.calculated_values[row][col]))
+            else:
                 self.selected_entry.delete(0, tk.END)
                 self.selected_entry.insert(0, self.data[row][col])
-            else:
-                # If the cell does not contain a formula, show the value in the entry widget
-                self.selected_entry.delete(0, tk.END)
-                self.selected_entry.insert(0, self.f[row][col])
+
+        # Update the flag to indicate that the cell is being edited
+        self.editing_cell = True
+
+        # Update the last edited cell
+        self.last_edited_cell = (row, col)
 
     def on_cell_change(self, row, col):
         # Update the data when a cell value changes
@@ -148,8 +152,17 @@ class SimpleExcel:
         if self.selected_cell == (row, col):
             # Show the formula if there is a formula, otherwise show the value
             if self.formulas[row][col]:
+                formula = '=' + self.formulas[row][col]
                 self.selected_entry.delete(0, tk.END)
-                self.selected_entry.insert(0, '=' + self.formulas[row][col])
+                self.selected_entry.insert(0, formula)
+
+                # Update the cell to show the formula
+                self.entries[row][col].delete(0, tk.END)
+                self.entries[row][col].insert(0, formula)
+
+                # If the formula has not changed since the last edit, update the calculated value
+                if self.last_edited_cell == (row, col):
+                    evaluate_and_update_dependents(self, row, col)
             else:
                 self.selected_entry.delete(0, tk.END)
                 self.selected_entry.insert(0, self.data[row][col])
@@ -157,6 +170,8 @@ class SimpleExcel:
         # Update the flag to indicate that the cell is being edited
         self.editing_cell = True
 
+        # Update the last edited cell
+        self.last_edited_cell = (row, col)
 
     def on_selected_entry_change(self, event):
         # Update the data when the separate entry field value changes
@@ -167,83 +182,36 @@ class SimpleExcel:
             self.entries[self.selected_cell[0]][self.selected_cell[1]].delete(0, tk.END)
             self.entries[self.selected_cell[0]][self.selected_cell[1]].insert(0, new_value)
 
-    def evaluate_and_update_dependents(self, row, col):
-        # Check if the cell contains a formula
-        if self.data[row][col] and self.data[row][col][0] == '=':
-            formula = self.data[row][col][1:]
-            try:
-                # Replace cell references with their values
-                processed_formula = self.replace_cell_references(formula)
+    # Add a new method to handle cell selection without pressing Enter
+    def on_cell_selection(self, event):
+        # Set the selected cell coordinates
+        row, col = self.selected_cell
 
-                # Evaluate the formula using sympy
-                result = sympify(processed_formula)
+        # Display the content of the selected cell in the entry widget
+        self.selected_entry.config(state=tk.NORMAL)  # Enable the entry field
 
-                # Update the cell value, formula, and calculated value with the result
-                self.entries[row][col].delete(0, tk.END)
-                self.entries[row][col].insert(0, str(result))
-                self.data[row][col] = str(result)
-                self.formulas[row][col] = formula
-                self.calculated_values[row][col] = str(result)
+    def on_focus_out(self, event):
+        # Process the formula for the last edited cell when an entry widget loses focus
+        if self.last_edited_cell:
+            row, col = self.get_selected_cell()
+            if self.formulas[row][col]:
+                evaluate_and_update_dependents(self, row, col)
 
-                # Update other cells that depend on this cell
-                for i in range(self.ROWS):
-                    for j in range(self.COLS):
-                        if i != row and j != col and self.data[i][j] and self.data[i][j][0] == '=':
-                            self.evaluate_and_update_dependents(i, j)
+        # Reset the last edited cell when an entry widget loses focus
+        self.last_edited_cell = None
 
-            except Exception as e:
-                messagebox.showerror("Error", f"Error evaluating formula: {e}")
-
-    def replace_cell_references(self, formula):
-        # Replace cell references (e.g., =A1) with their corresponding values
-        cell_pattern = re.compile(r'[A-E]\d')
-        matches = cell_pattern.findall(formula)
-
-        for match in matches:
-            row = int(match[1]) - 1
-            col = ord(match[0]) - ord('A')
-            cell_value = self.data[row][col]
-            formula = formula.replace(match, cell_value)
-
-        return formula
+    # Add a new method to get the selected cell coordinates
+    def get_selected_cell(self):
+        return self.selected_cell    
 
     def save_to_json(self):
-        # Save data, formulas, and calculated values to a JSON file
-        data_to_save = {
-            'data': self.data,
-            'formulas': self.formulas,
-            'calculated_values': self.calculated_values
-        }
-
-        with open('excel_data.json', 'w') as json_file:
-            json.dump(data_to_save, json_file)
+        save_to_json(self)
 
     def load_from_json(self):
-        try:
-            with open('excel_data.json', 'r') as json_file:
-                loaded_data = json.load(json_file)
-
-            self.data = loaded_data['data']
-            self.formulas = loaded_data['formulas']
-            self.calculated_values = loaded_data['calculated_values']
-
-            for i in range(self.ROWS):
-                for j in range(self.COLS):
-                    self.entries[i][j].delete(0, tk.END)
-                    self.entries[i][j].insert(0, self.data[i][j])
-
-        except (FileNotFoundError, json.decoder.JSONDecodeError) as e:
-            messagebox.showerror("Error", f"Error loading data: {e}")
+        load_from_json(self)
 
     def cloud_save(self):
-        # Placeholder for cloud save functionality
-        print("Cloud Save button pressed")
+        cloud_save(self)
 
     def cloud_load(self):
-        # Placeholder for cloud load functionality
-        print("Cloud Load button pressed")
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = SimpleExcel(root)
-    root.mainloop()
+        cloud_load(self)
