@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import messagebox
 from utils import evaluate_and_update_dependents, replace_cell_references, save_to_json, load_from_json, cloud_save, cloud_load
+from mongodb_utils import cloud_save_to_mongodb, cloud_load_from_mongodb
 
 class SimpleExcel:
     ROWS = 5
@@ -83,10 +84,12 @@ class SimpleExcel:
             # Store the formula in the formulas list
             self.formulas[row][col] = formula
     
-            # If there is a formula, display it in the entry field
+            # If there is a formula, display it in the entry field with '=' sign
             if formula:
+                # Add '=' sign if not already present
+                formula_with_equals = '=' + formula if not formula.startswith('=') else formula
                 self.selected_entry.delete(0, tk.END)
-                self.selected_entry.insert(0, '=' + formula)
+                self.selected_entry.insert(0, formula_with_equals)
     
         self.editing_cell = True
         self.last_edited_cell = (row, col)
@@ -168,10 +171,29 @@ class SimpleExcel:
         load_from_json(self)
 
     def cloud_save(self):
-        cloud_save(self)
+        success, message = cloud_save_to_mongodb(self.data, self.formulas, self.calculated_values)
+        if success:
+            messagebox.showinfo("Success", message)
+        else:
+            messagebox.showerror("Error", message)
 
     def cloud_load(self):
-        cloud_load(self)
+        success, result = cloud_load_from_mongodb()
+        if success:
+            loaded_data = result
+            self.data = loaded_data.get("data", [['' for _ in range(self.COLS)] for _ in range(self.ROWS)])
+            self.formulas = loaded_data.get("formulas", [['' for _ in range(self.COLS)] for _ in range(self.ROWS)])
+            self.calculated_values = loaded_data.get("calculated_values", [['' for _ in range(self.COLS)] for _ in range(self.ROWS)])
+
+            # Update the GUI with the loaded data
+            for i in range(self.ROWS):
+                for j in range(self.COLS):
+                    self.entries[i][j].delete(0, tk.END)
+                    self.entries[i][j].insert(0, str(self.data[i][j]))
+
+            messagebox.showinfo("Success", "Data loaded from MongoDB.")
+        else:
+            messagebox.showerror("Error", result)
 
 if __name__ == "__main__":
     root = tk.Tk()

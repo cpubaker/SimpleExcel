@@ -5,9 +5,18 @@ import tkinter as tk
 from sympy import sympify
 from tkinter import messagebox
 
-def evaluate_and_update_dependents(self, row, col):
+def evaluate_and_update_dependents(self, row, col, visited=None):
     # Check if the cell contains a formula
     print("evaluate_and_update_dependents")
+
+    if visited is None:
+        visited = set()
+
+    if (row, col) in visited:
+        # Already visited this cell, stop recursion
+        return
+
+    visited.add((row, col))
 
     if self.formulas[row][col]:
         formula = self.formulas[row][col]
@@ -40,10 +49,18 @@ def evaluate_and_update_dependents(self, row, col):
                 for j in range(self.COLS):
                     if i != row and j != col and self.formulas[i][j]:
                         print(f"Recursively calling evaluate_and_update_dependents for cell ({i}, {j})")
-                        self.evaluate_and_update_dependents(i, j)
+                        evaluate_and_update_dependents(self, i, j, visited)
 
         except Exception as e:
-            messagebox.showerror("Error", f"Error evaluating formula: {e}")
+            print(f"Error evaluating formula: {e}")
+            # Set 'ERR' if an error occurs
+            self.entries[row][col].delete(0, tk.END)
+            self.entries[row][col].insert(0, 'ERR')
+            self.data[row][col] = 'ERR'
+            self.formulas[row][col] = formula
+            self.calculated_values[row][col] = 'ERR'
+
+
 
 def replace_cell_references(formula, excel_instance):
     # Replace cell references (e.g., =A1) with their corresponding values
